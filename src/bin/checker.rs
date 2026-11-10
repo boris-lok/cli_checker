@@ -1,9 +1,19 @@
 use clap::Parser;
+use cli::checker::config::Config;
 use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    // Read the configuration file, and parse it into a Config struct
+    let f = std::fs::File::open(cli.config_path)?;
+    let config: Config = serde_norway::from_reader(std::io::BufReader::new(f))?;
+
+    if cli.verify {
+        println!("{}", serde_norway::to_string(&config)?);
+        return Ok(());
+    }
 
     Ok(())
 }

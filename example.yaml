@@ -1,0 +1,48 @@
+version: 3
+
+name: "Example"
+
+setups:
+  - description: "Deploy a device"
+    cmd: mytool deploy ...
+    extract:
+      deploy_id: "/deploy/b(\\d+)"
+
+run:
+  description: "Run a job"
+  cmd: mytool start --deploy {{ setups.deploy.deploy_id }}
+  timeout: 10s
+  extract:
+    job_id: "job=(\\w+)"
+    link: "(https://\\S+)"
+  expect:
+    - exit_code: 0
+    - exec:
+        description: "Check the job"
+        cmd: mytool check {{ run.job_id }}
+        expect:
+          - exit_code: 0
+      continue_on_failure: true
+
+teardown:
+  - description: "Cleanup"
+    cmd: mytool cleanup --deploy {{ setups.deploy.deploy_id }}
+    allow_failure: true
+
+outputs: # the contract handed to poll
+  deploy_id: "{{ setups.deploy.deploy_id }}"
+  job_id: "{{ run.job_id }}"
+  link: "{{ run.link }}"
+
+poll:
+  when: run_passed # don't poll if the run failed
+  cmd: mytool status --job {{ outputs.job_id }}
+  timeout: 30s
+  interval: 30m
+  max_duration: 72h
+  until:
+    - stdout:
+        - contains: 'all passed'
+  fail_when: # stop polling and mark the step as failed
+    - stdout:
+        - contains: 'failed'
