@@ -7,6 +7,10 @@ pub struct Config {
     /// The name of Task
     pub name: String,
 
+    /// The variables for the task
+    #[serde(default)]
+    pub vars: HashMap<String, String>,
+
     /// Setup steps
     ///
     /// Before running the task, the setups will be executed in first order.

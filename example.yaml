@@ -2,6 +2,9 @@ version: 3
 
 name: "Example"
 
+vars:
+  name: "{{ random }}"
+
 setups:
   - description: "Deploy a device"
     cmd: mytool deploy ...
