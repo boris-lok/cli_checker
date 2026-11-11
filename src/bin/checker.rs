@@ -1,5 +1,7 @@
 use clap::Parser;
 use cli::checker::config::Config;
+use cli::checker::template::{UndefinedVariableError, render};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -14,6 +16,13 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", serde_norway::to_string(&config)?);
         return Ok(());
     }
+
+    let mut m = HashMap::new();
+    let mut ctx = config
+        .vars
+        .into_iter()
+        .map(|(k, v)| Ok((k, render(&v, &m)?)))
+        .collect::<Result<HashMap<_, _>, UndefinedVariableError>>()?;
 
     Ok(())
 }

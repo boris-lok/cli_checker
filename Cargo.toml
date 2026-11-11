@@ -17,3 +17,6 @@ humantime-serde = "1.1.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_norway = "0.9.42"
 tokio = { version = "1.54.1", features = ["full"] }
+regex = "1.13.1"
+uuid = { version = "1.29.2", features = ["v4"] }
+chrono = "0.4.45"
