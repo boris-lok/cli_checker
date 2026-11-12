@@ -46,8 +46,10 @@ poll:
   interval: 30m
   max_duration: 72h
   until:
-    - stdout:
-        - contains: 'all passed'
+    - json:
+        - key: status
+          op: eq
+          value: passed
   fail_when: # stop polling and mark the step as failed
     - stdout:
         - contains: 'failed'

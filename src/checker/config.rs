@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_norway::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -94,6 +95,10 @@ pub enum ExpectKind {
 
     /// Expect the stderr of the step to match the given value
     Stderr(Vec<Matcher>),
+
+    /// Expect the JSON output of the step to match the given value
+    /// use stdout only
+    Json(Vec<JsonMatcher>),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -188,4 +193,28 @@ pub enum PollWhen {
     RunPassed,
     Always,
     RunFailed,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub enum JsonMatcherOp {
+    Eq,
+    NotEq,
+    Contains,
+    NotContains,
+    Exists,
+    NotExists,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct JsonMatcher {
+    /// The key to match
+    /// If we want to match a nested key, use dot notation, e.g. "a.b.c"
+    pub key: String,
+
+    /// The operation to perform on the value
+    /// e.g. eq, neq, contains, not_contains, exists, not_exists
+    pub op: JsonMatcherOp,
+
+    /// The value we expect
+    pub value: Value,
 }
