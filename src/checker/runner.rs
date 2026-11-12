@@ -56,6 +56,11 @@ impl<R: CommandExecutor> StepRunner<R> {
 
     fn run_once(&self, step: &Step, ctx: &Vars) -> anyhow::Result<(CommandOutput, Vars)> {
         let cmd = render(&step.cmd, ctx)?;
+
+        if self.verbose {
+            println!("running: {cmd:?}");
+        }
+
         let out = self
             .runner
             .run(&cmd, step.timeout)
@@ -63,6 +68,10 @@ impl<R: CommandExecutor> StepRunner<R> {
 
         if out.is_timeout {
             anyhow::bail!("step timed out after {:?}", out.elapsed)
+        }
+
+        if self.verbose {
+            println!("output: {out:?}");
         }
 
         let mut scope = ctx.clone();
@@ -100,6 +109,10 @@ impl<R: CommandExecutor> StepRunner<R> {
         kind: &ExpectKind,
         ctx: &mut Vars,
     ) -> anyhow::Result<()> {
+        if self.verbose {
+            println!("expect: {kind:?}");
+        }
+
         Ok(match kind {
             ExpectKind::Exec(step) => self.run(step, ctx).map(drop)?,
             ExpectKind::ExitCode(code) => check_exit_code(out, *code)?,
