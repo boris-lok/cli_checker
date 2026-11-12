@@ -25,6 +25,8 @@ run:
         cmd: mytool check {{ run.job_id }}
         expect:
           - exit_code: 0
+          - stdout:
+              - match: "[0-9]+"
       continue_on_failure: true
 
 teardown:

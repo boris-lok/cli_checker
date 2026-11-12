@@ -1,6 +1,9 @@
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+
+pub type Vars = HashMap<String, String>;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
@@ -9,7 +12,7 @@ pub struct Config {
 
     /// The variables for the task
     #[serde(default)]
-    pub vars: HashMap<String, String>,
+    pub vars: Vars,
 
     /// Setup steps
     ///
@@ -93,6 +96,32 @@ pub enum ExpectKind {
     Stderr(Vec<Matcher>),
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(try_from = "String", into = "String")]
+pub struct Expr(pub Regex);
+
+impl TryFrom<String> for Expr {
+    type Error = regex::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Regex::new(&value).map(Expr)
+    }
+}
+
+impl From<Expr> for String {
+    fn from(value: Expr) -> Self {
+        value.0.as_str().to_string()
+    }
+}
+
+impl std::ops::Deref for Expr {
+    type Target = Regex;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Matcher {
@@ -107,6 +136,9 @@ pub enum Matcher {
 
     /// check if the string is not equal to the given value
     NotEq(String),
+
+    /// check if the string matches the given regex
+    Match(Expr),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
