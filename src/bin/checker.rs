@@ -1,5 +1,7 @@
 use clap::Parser;
 use cli::checker::config::Config;
+use cli::checker::executor::ShellCommandExecutor;
+use cli::checker::runner::StepRunner;
 use cli::checker::template::{UndefinedVariableError, render};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,12 +19,25 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let mut m = HashMap::new();
+    let m = HashMap::new();
     let mut ctx = config
         .vars
         .into_iter()
         .map(|(k, v)| Ok((k, render(&v, &m)?)))
         .collect::<Result<HashMap<_, _>, UndefinedVariableError>>()?;
+
+    let executor = ShellCommandExecutor;
+    let step_runner = StepRunner::new(executor, cli.verbose);
+    for step in config.setups.iter() {
+        step_runner.run(step, &mut ctx)?;
+    }
+
+    // we won't use `?` here, because we want to continue running teardown steps even if the run step fails
+    let _ = step_runner.run(&config.run, &mut ctx);
+
+    for step in config.teardown.iter() {
+        step_runner.run(step, &mut ctx)?;
+    }
 
     Ok(())
 }
