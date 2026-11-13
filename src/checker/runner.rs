@@ -87,13 +87,15 @@ impl<R: CommandExecutor> StepRunner<R> {
         for (i, c) in expect.iter().enumerate() {
             if let Err(e) = self.check_once(out, &c.kind, ctx) {
                 let e = e.context(format!("failed to check expect #{i}"));
-                if !c.continue_on_failure {
-                    return Err(e);
-                }
 
                 if self.verbose {
                     eprintln!("{e:#} (continuing)");
                 }
+
+                if !c.continue_on_failure {
+                    return Err(e);
+                }
+
                 failed += 1;
             }
         }
