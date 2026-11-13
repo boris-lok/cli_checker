@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use crate::checker::config::{Expect, ExpectKind, JsonMatcher, JsonMatcherOp, Matcher, Step, Vars};
 use crate::checker::executor::{CommandExecutor, CommandOutput};
 use crate::checker::template::render;
@@ -124,7 +125,7 @@ impl<R: CommandExecutor> StepRunner<R> {
             ExpectKind::ExitCode(code) => check_exit_code(out, *code)?,
             ExpectKind::Stdout(ms) => check_stream(out, Stream::Stdout, ms, ctx)?,
             ExpectKind::Stderr(ms) => check_stream(out, Stream::Stderr, ms, ctx)?,
-            ExpectKind::Json(ms) => check_json(out, ms)?,
+            ExpectKind::Json(ms) => check_json(out, ms, ctx)?,
         };
 
         Ok(())
@@ -237,10 +238,10 @@ fn check_exit_code(out: &CommandOutput, want: i32) -> anyhow::Result<()> {
 
 /// The function checks the json output from the stdout
 /// If the json output does not match the given json_matcher, return an error.
-fn check_json(out: &CommandOutput, ms: &[JsonMatcher]) -> anyhow::Result<()> {
+fn check_json(out: &CommandOutput, ms: &[JsonMatcher], ctx: &Vars) -> anyhow::Result<()> {
     let doc: Value = serde_norway::from_str(&out.stdout)?;
     for m in ms.iter() {
-        inner_check_json(&doc, m)?
+        inner_check_json(&doc, m, ctx)?
     }
 
     Ok(())
@@ -248,22 +249,26 @@ fn check_json(out: &CommandOutput, ms: &[JsonMatcher]) -> anyhow::Result<()> {
 
 /// The function checks the json output from the stdout
 /// If the json output does not match the given json_matcher, return an error.
-fn inner_check_json(doc: &Value, json_matcher: &JsonMatcher) -> anyhow::Result<()> {
+fn inner_check_json(doc: &Value, json_matcher: &JsonMatcher, ctx: &Vars) -> anyhow::Result<()> {
     let path = json_matcher
         .key
         .split('.')
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
     let found = lookup(doc, &path);
-    let expected = &json_matcher.value;
+    let expected: Cow<Value> = if let Value::String(s) = &json_matcher.value {
+        Cow::Owned(Value::String(render(s, ctx)?))
+    } else {
+        Cow::Borrowed(&json_matcher.value)
+    };
 
     let passed = match json_matcher.op {
         JsonMatcherOp::Exists => found.is_some(),
         JsonMatcherOp::NotExists => found.is_none(),
-        JsonMatcherOp::Eq => found.is_some_and(|v| json_eq(v, expected)),
-        JsonMatcherOp::NotEq => !found.is_some_and(|v| json_eq(v, expected)),
-        JsonMatcherOp::Contains => found.is_some_and(|v| json_contains(v, expected)),
-        JsonMatcherOp::NotContains => !found.is_some_and(|v| json_contains(v, expected)),
+        JsonMatcherOp::Eq => found.is_some_and(|v| json_eq(v, &expected)),
+        JsonMatcherOp::NotEq => !found.is_some_and(|v| json_eq(v, &expected)),
+        JsonMatcherOp::Contains => found.is_some_and(|v| json_contains(v, &expected)),
+        JsonMatcherOp::NotContains => !found.is_some_and(|v| json_contains(v, &expected)),
     };
 
     if passed {
@@ -318,20 +323,29 @@ fn json_eq(a: &Value, b: &Value) -> bool {
 pub fn lookup<'a>(mut cur: &'a Value, path: &[String]) -> Option<&'a Value> {
     for seg in path {
         cur = match cur {
-            Value::Mapping(m) => m.get(seg)?,
-            Value::Sequence(a) => match seg.parse::<usize>() {
-                Ok(i) => a.get(i)?,
-                Err(_) => a.iter().find_map(|item| {
-                    let obj = item.as_mapping()?;
-                    (obj.get("key")?.as_str()? == seg)
-                        .then(|| obj.get("value"))
-                        .flatten()
-                })?,
-            },
+            Value::Mapping(m) => m.get(seg.as_str())?,
+            Value::Sequence(a) => {
+                if let Ok(i) = seg.parse::<usize>() {
+                    // args.3
+                    a.get(i)?
+                } else if let Some((field, want)) = seg.split_once('=') {
+                    // args.flag=extra_build_flavor  -> returns the whole item
+                    a.iter()
+                        .find(|item| item.get(field).and_then(Value::as_str) == Some(want))?
+                } else {
+                    // args.extra_build_flavor  -> returns item["value"]
+                    a.iter().find_map(|item| {
+                        let obj = item.as_mapping()?;
+                        let name = ["key", "flag", "name"]
+                            .iter()
+                            .find_map(|k| obj.get(*k)?.as_str())?;
+                        (name == seg).then(|| obj.get("value")).flatten()
+                    })?
+                }
+            }
             _ => return None,
         }
     }
-
     Some(cur)
 }
 
@@ -726,7 +740,7 @@ mod tests {
             jm("zero.x", NotExists, Value::Null),
         ];
 
-        let res = check_json(&out, &matcher);
+        let res = check_json(&out, &matcher, &HashMap::new());
         assert!(res.is_ok(), "{res:?}");
     }
 
@@ -754,7 +768,7 @@ mod tests {
 
         for m in cases {
             let desc = format!("{} {:?} {:?}", m.key, m.op, m.value);
-            let res = check_json(&out, std::slice::from_ref(&m));
+            let res = check_json(&out, std::slice::from_ref(&m), &HashMap::new());
             assert!(res.is_err(), "expected failure: {desc}");
         }
     }
@@ -765,7 +779,7 @@ mod tests {
         let doc = format!("{}1{}", r#"{"a":"#.repeat(depth), "}".repeat(depth));
         let key = vec!["a"; depth].join(".");
 
-        let res = check_json(&output(&doc), &[jm(&key, JsonMatcherOp::Eq, num("1"))]);
+        let res = check_json(&output(&doc), &[jm(&key, JsonMatcherOp::Eq, num("1"))], &HashMap::new());
         assert!(res.is_ok(), "{res:?}");
     }
 
