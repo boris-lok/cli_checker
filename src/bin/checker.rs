@@ -36,7 +36,8 @@ async fn main() -> anyhow::Result<()> {
     let _ = step_runner.run(&config.run, &mut ctx);
 
     for step in config.teardown.iter() {
-        step_runner.run(step, &mut ctx)?;
+        // ignore the result of teardown steps
+        let _ = step_runner.run(step, &mut ctx);
     }
 
     Ok(())
