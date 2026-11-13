@@ -79,7 +79,7 @@ impl<R: CommandExecutor> StepRunner<R> {
         self.check(&out, &step.expect, &mut scope)?;
 
         if self.verbose {
-            println!("step {} -> succeeded", &step.description);
+            println!("step {} -> succeeded", step.description);
         }
 
         Ok((out, scope))
@@ -119,13 +119,15 @@ impl<R: CommandExecutor> StepRunner<R> {
             println!("expect: {kind:?}");
         }
 
-        Ok(match kind {
+        let _: () = match kind {
             ExpectKind::Exec(step) => self.run(step, ctx).map(drop)?,
             ExpectKind::ExitCode(code) => check_exit_code(out, *code)?,
             ExpectKind::Stdout(ms) => check_stream(out, Stream::Stdout, ms, ctx)?,
             ExpectKind::Stderr(ms) => check_stream(out, Stream::Stderr, ms, ctx)?,
             ExpectKind::Json(ms) => check_json(out, ms)?,
-        })
+        };
+
+        Ok(())
     }
 }
 
@@ -215,7 +217,7 @@ fn check_text(name: &str, text: &str, m: &Matcher, ctx: &mut Vars) -> anyhow::Re
             let s = render(s, ctx)?;
             (text != s, format!("not equal {s:?}"))
         }
-        Matcher::Match(e) => (e.is_match(&text), format!("match /{}/", e.as_str())),
+        Matcher::Match(e) => (e.is_match(text), format!("match /{}/", e.as_str())),
     };
 
     anyhow::ensure!(ok, "{name} should {expected}, but was {text:?}");
@@ -252,7 +254,7 @@ fn inner_check_json(doc: &Value, json_matcher: &JsonMatcher) -> anyhow::Result<(
         .split('.')
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
-    let found = lookup(&doc, &path);
+    let found = lookup(doc, &path);
     let expected = &json_matcher.value;
 
     let passed = match json_matcher.op {
