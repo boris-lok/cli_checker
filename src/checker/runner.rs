@@ -78,6 +78,10 @@ impl<R: CommandExecutor> StepRunner<R> {
         extract(&out, &step.extract, &mut scope)?;
         self.check(&out, &step.expect, &mut scope)?;
 
+        if self.verbose {
+            println!("step {} -> succeeded", &step.description);
+        }
+
         Ok((out, scope))
     }
 
