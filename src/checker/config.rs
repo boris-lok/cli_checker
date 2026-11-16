@@ -162,12 +162,8 @@ pub struct Poll {
     #[serde(default)]
     when: PollWhen,
 
-    /// The command to run it periodically
-    cmd: String,
-
-    /// The timeout for the command
-    #[serde(default, with = "humantime_serde")]
-    timeout: Duration,
+    /// The step to run it periodically
+    run: Step,
 
     /// The interval between polls
     #[serde(default, with = "humantime_serde")]
@@ -176,14 +172,6 @@ pub struct Poll {
     /// The maximum duration to run the polling
     #[serde(default, with = "humantime_serde")]
     max_duration: Duration,
-
-    /// The condition to stop polling
-    #[serde(default)]
-    until: Vec<Expect>,
-
-    /// The condition to mark the step as failed, and it will stop polling
-    #[serde(default)]
-    fail_when: Vec<Expect>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]

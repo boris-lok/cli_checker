@@ -3,7 +3,7 @@ version: 3
 name: "Example"
 
 vars:
-  name: "{{ random }}"
+  name: "{{random}}"
 
 setups:
   - description: "Deploy a device"
@@ -13,7 +13,7 @@ setups:
 
 run:
   description: "Run a job"
-  cmd: mytool start --deploy {{ setups.deploy.deploy_id }}
+  cmd: mytool start --deploy {{deploy_id}}
   timeout: 10s
   extract:
     job_id: "job=(\\w+)"
@@ -22,7 +22,7 @@ run:
     - exit_code: 0
     - exec:
         description: "Check the job"
-        cmd: mytool check {{ run.job_id }}
+        cmd: mytool check {{run.job_id}}
         expect:
           - exit_code: 0
           - stdout:
@@ -31,25 +31,25 @@ run:
 
 teardown:
   - description: "Cleanup"
-    cmd: mytool cleanup --deploy {{ setups.deploy.deploy_id }}
+    cmd: mytool cleanup --deploy {{deploy_id}}
     allow_failure: true
 
 outputs: # the contract handed to poll
-  deploy_id: "{{ setups.deploy.deploy_id }}"
-  job_id: "{{ run.job_id }}"
-  link: "{{ run.link }}"
+  deploy_id: "{{setups.deploy.deploy_id}}"
+  job_id: "{{run.job_id}}"
+  link: "{{run.link}}"
 
 poll:
   when: run_passed # don't poll if the run failed
-  cmd: mytool status --job {{ outputs.job_id }}
-  timeout: 30s
+  run:
+    description: "Poll the job status"
+    cmd: mytool status --job {{job_id}}
+    timeout: 30s
+    expect:
+      - exit_code: 0
+      - json:
+          - key: status
+            op: eq
+            value: passed
   interval: 30m
   max_duration: 72h
-  until:
-    - json:
-        - key: status
-          op: eq
-          value: passed
-  fail_when: # stop polling and mark the step as failed
-    - stdout:
-        - contains: 'failed'
