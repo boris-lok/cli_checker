@@ -183,7 +183,7 @@ pub enum PollWhen {
     RunFailed,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum JsonMatcherOp {
     Eq,
@@ -192,9 +192,27 @@ pub enum JsonMatcherOp {
     NotContains,
     Exists,
     NotExists,
+    Match,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+/// The raw structure for a JSON matcher and we will convert it to a JsonMatcher
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct RawJsonMatcher {
+    /// The key to match
+    /// If we want to match a nested key, use dot notation, e.g. "a.b.c"
+    pub key: String,
+
+    /// The operation to perform on the value
+    /// e.g. eq, neq, contains, not_contains, exists, not_exists
+    pub op: JsonMatcherOp,
+
+    /// The value we expect
+    #[serde(default)]
+    pub value: Value,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(try_from = "RawJsonMatcher", into = "RawJsonMatcher")]
 pub struct JsonMatcher {
     /// The key to match
     /// If we want to match a nested key, use dot notation, e.g. "a.b.c"
@@ -206,4 +224,52 @@ pub struct JsonMatcher {
 
     /// The value we expect
     pub value: Value,
+
+    /// The regex we expect
+    /// when the op == match, it will compile the value into a regex
+    pub regex: Option<Regex>,
+}
+
+impl TryFrom<RawJsonMatcher> for JsonMatcher {
+    type Error = String;
+
+    fn try_from(raw: RawJsonMatcher) -> Result<Self, Self::Error> {
+        if raw.key.is_empty() || raw.key.split('.').any(str::is_empty) {
+            return Err(format!("invalid key {:?}", raw.key));
+        }
+
+        let regex = match raw.op {
+            JsonMatcherOp::Match => {
+                let Value::String(pat) = &raw.value else {
+                    return Err(format!(
+                        "`match` on {:?} needs a string pattern, got {:?}",
+                        raw.key, raw.value
+                    ));
+                };
+                Some(
+                    Regex::new(pat)
+                        .map_err(|e| format!("invalid regex {pat:?} for key {:?}: {e}", raw.key))?,
+                )
+            }
+            JsonMatcherOp::Exists | JsonMatcherOp::NotExists => None,
+            _ => None,
+        };
+
+        Ok(Self {
+            key: raw.key,
+            op: raw.op,
+            value: raw.value,
+            regex,
+        })
+    }
+}
+
+impl From<JsonMatcher> for RawJsonMatcher {
+    fn from(value: JsonMatcher) -> Self {
+        Self {
+            key: value.key,
+            op: value.op,
+            value: value.value,
+        }
+    }
 }

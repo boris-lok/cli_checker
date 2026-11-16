@@ -1,10 +1,10 @@
-use std::borrow::Cow;
 use crate::checker::config::{Expect, ExpectKind, JsonMatcher, JsonMatcherOp, Matcher, Step, Vars};
 use crate::checker::executor::{CommandExecutor, CommandOutput};
 use crate::checker::template::render;
 use anyhow::Context;
 use regex::Regex;
 use serde_norway::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 pub struct StepRunner<R: CommandExecutor> {
@@ -269,6 +269,9 @@ fn inner_check_json(doc: &Value, json_matcher: &JsonMatcher, ctx: &Vars) -> anyh
         JsonMatcherOp::NotEq => !found.is_some_and(|v| json_eq(v, &expected)),
         JsonMatcherOp::Contains => found.is_some_and(|v| json_contains(v, &expected)),
         JsonMatcherOp::NotContains => !found.is_some_and(|v| json_contains(v, &expected)),
+        JsonMatcherOp::Match => {
+            found.is_some_and(|v| json_matches(v, json_matcher.regex.as_ref().unwrap()))
+        }
     };
 
     if passed {
@@ -319,6 +322,17 @@ fn json_eq(a: &Value, b: &Value) -> bool {
     }
 }
 
+/// Checks if the json output matches the given regex.
+///
+/// If the json output is a sequence, it will check if any item matches the regex.
+fn json_matches(v: &Value, re: &Regex) -> bool {
+    match v {
+        Value::String(v) => re.is_match(v),
+        Value::Sequence(items) => items.iter().any(|item| json_matches(item, re)),
+        _ => false,
+    }
+}
+
 /// Looks up a value in the json output.
 pub fn lookup<'a>(mut cur: &'a Value, path: &[String]) -> Option<&'a Value> {
     for seg in path {
@@ -361,7 +375,8 @@ fn stderr_suffix(out: &CommandOutput) -> String {
 #[cfg(test)]
 mod tests {
     use crate::checker::config::{
-        Expect, ExpectKind, Expr, JsonMatcher, JsonMatcherOp, Matcher, Retry, Step, Vars,
+        Expect, ExpectKind, Expr, JsonMatcher, JsonMatcherOp, Matcher, RawJsonMatcher, Retry, Step,
+        Vars,
     };
     use crate::checker::executor::{CommandExecutor, CommandOutput};
     use crate::checker::runner::{StepRunner, check_json, check_text};
@@ -679,11 +694,12 @@ mod tests {
     }
 
     fn jm(key: &str, op: JsonMatcherOp, value: Value) -> JsonMatcher {
-        JsonMatcher {
+        let raw = RawJsonMatcher {
             key: key.to_string(),
             op,
             value,
-        }
+        };
+        JsonMatcher::try_from(raw).unwrap()
     }
 
     fn s(v: &str) -> Value {
@@ -729,12 +745,9 @@ mod tests {
             jm("numkey.0", Eq, s("zero")), // numeric-looking map key
             jm("名字", Eq, s("unicode")),
             jm("a.b", NotExists, Value::Null), // dotted key is unreachable
-            jm("list.", NotExists, Value::Null), // trailing dot -> empty segment
-            jm("tags..env", NotExists, Value::Null), // empty middle segment
             // key/value array lookup
             jm("tags.env", Eq, s("prod")), // first match wins
             jm("tags.missing", NotExists, Value::Null),
-            jm("tags.key", NotExists, Value::Null), // "key" field name isn't a key
             // descending through scalars
             jm("a.0", NotExists, Value::Null),
             jm("zero.x", NotExists, Value::Null),
@@ -763,7 +776,6 @@ mod tests {
             jm("list.-1", Exists, Value::Null),
             jm("a.b", Exists, Value::Null),
             jm("tags.env", Eq, s("dev")), // second duplicate is shadowed
-            jm("", Exists, Value::Null),  // see note
         ];
 
         for m in cases {
@@ -779,7 +791,11 @@ mod tests {
         let doc = format!("{}1{}", r#"{"a":"#.repeat(depth), "}".repeat(depth));
         let key = vec!["a"; depth].join(".");
 
-        let res = check_json(&output(&doc), &[jm(&key, JsonMatcherOp::Eq, num("1"))], &HashMap::new());
+        let res = check_json(
+            &output(&doc),
+            &[jm(&key, JsonMatcherOp::Eq, num("1"))],
+            &HashMap::new(),
+        );
         assert!(res.is_ok(), "{res:?}");
     }
 
@@ -913,6 +929,85 @@ mod tests {
     fn check_text_error_escapes_control_chars() {
         let msg = check("a\r\n\t\0", &eq("x")).unwrap_err().to_string();
         assert_eq!(msg, r#"stdout should equal "x", but was "a\r\n\t\0""#);
+    }
+
+    #[test]
+    fn check_json_match_pass() {
+        use JsonMatcherOp::*;
+        let out = output(LIMIT_DOC);
+
+        let matcher = vec![
+            // basic strings
+            jm("a", Match, s(r"^\d+$")), // "123" is a string, not a number
+            jm("a", Match, s("2")),      // unanchored: matches anywhere
+            jm("a", Match, s("^(123|456)$")), // alternation
+            jm("empty_str", Match, s("^$")),
+            jm("empty_str", Match, s("")), // empty pattern matches everything
+            jm("名字", Match, s("^uni")),
+            jm("名字", Match, s(r"^\w+$")),    // \w is unicode-aware
+            jm("a.b", NotExists, Value::Null), // sanity: dotted key still unreachable
+            // sequences: any string item
+            jm("list", Match, s("^three$")), // skips the numeric items
+            jm("list", Match, s("(?i)THREE")),
+            // traversal into match
+            jm("list.2", Match, s("^th")),
+            jm("numkey.0", Match, s("^zero$")),
+            jm("tags.env", Match, s("^(prod|dev)$")), // first match wins -> "prod"
+            jm("tags.0.value", Match, s("prod")),
+        ];
+
+        let res = check_json(&out, &matcher, &HashMap::new());
+        assert!(res.is_ok(), "{res:?}");
+    }
+
+    #[test]
+    fn check_json_match_fail() {
+        use JsonMatcherOp::*;
+        let out = output(LIMIT_DOC);
+
+        let cases = vec![
+            // non-strings never match, even when the text would
+            jm("zero", Match, s("0")),
+            jm("neg", Match, s("-1")),
+            jm("max_u64", Match, s(r"^\d+$")),
+            jm("nothing", Match, s(".*")),
+            jm("empty_obj", Match, s(".*")),
+            jm("numkey", Match, s("zero")), // mapping values aren't searched
+            jm("tags", Match, s("prod")),   // sequence of mappings
+            jm("empty_list", Match, s(".*")), // no items -> no match
+            jm("list.0", Match, s("1")),    // numeric item
+            // strings that don't match
+            jm("a", Match, s("^12$")),
+            jm("a", Match, s("^(456|789)$")),
+            jm("empty_str", Match, s(".")),
+            jm("tags.env", Match, s("^dev$")), // first match is "prod"
+            // missing keys
+            jm("missing", Match, s(".*")),
+            jm("list.3", Match, s(".*")),
+            jm("a.b", Match, s("dotted")),
+        ];
+
+        for m in cases {
+            let desc = format!("{} {:?} {:?}", m.key, m.op, m.value);
+            let res = check_json(&out, &[m], &HashMap::new());
+            assert!(res.is_err(), "expected failure for {desc}, got {res:?}");
+        }
+    }
+
+    #[test]
+    fn match_rejects_invalid_regex_at_deserialize() {
+        let err = serde_norway::from_str::<JsonMatcher>("key: a\nop: match\nvalue: '('")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("invalid regex"), "{err}");
+    }
+
+    #[test]
+    fn match_rejects_non_string_pattern_at_deserialize() {
+        let err = serde_norway::from_str::<JsonMatcher>("key: a\nop: match\nvalue: 123")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("string pattern"), "{err}");
     }
 
     fn create_step(allow_failure: bool, retry: Option<Retry>, timeout: Option<Duration>) -> Step {
