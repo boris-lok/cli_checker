@@ -38,7 +38,7 @@ pub struct Config {
     pub poll: Option<Poll>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Step {
     /// Description of the step
     pub description: String,
@@ -68,7 +68,7 @@ pub struct Step {
     pub timeout: Option<Duration>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Expect {
     /// Contains different types of expectations
     #[serde(flatten)]
@@ -81,7 +81,7 @@ pub struct Expect {
     pub continue_on_failure: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpectKind {
     /// Execute another step as an expectation
@@ -127,7 +127,7 @@ impl std::ops::Deref for Expr {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Matcher {
     /// check if the string contains the given value
@@ -146,7 +146,7 @@ pub enum Matcher {
     Match(Expr),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Retry {
     /// The number of times to retry the step
     pub times: i32,
@@ -156,7 +156,7 @@ pub struct Retry {
     pub interval: Duration,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Poll {
     /// Polling when run is passed
     #[serde(default)]
@@ -174,7 +174,7 @@ pub struct Poll {
     pub max_duration: Duration,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize, Eq, PartialEq, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum PollWhen {
     #[default]

@@ -1,6 +1,6 @@
 use clap::Parser;
-use cli::checker::config::Config;
-use cli::checker::executor::ShellCommandExecutor;
+use cli::checker::config::{Config, PollWhen, Vars};
+use cli::checker::executor::{CommandOutput, ShellCommandExecutor};
 use cli::checker::runner::StepRunner;
 use cli::checker::template::{UndefinedVariableError, render};
 use cli::constants::DATABASE_PATH;
@@ -9,7 +9,6 @@ use cli::poll::store::{SQLiteTaskStore, TaskStore};
 use cli::utils::create_database;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::SystemTime;
 
 #[tokio::main]
@@ -28,6 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let m = HashMap::new();
     let mut ctx = config
         .vars
+        .clone()
         .into_iter()
         .map(|(k, v)| Ok((k, render(&v, &m)?)))
         .collect::<Result<HashMap<_, _>, UndefinedVariableError>>()?;
@@ -39,42 +39,56 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // we won't use `?` here, because we want to continue running teardown steps even if the run step fails
-    let _ = step_runner.run(&config.run, &mut ctx);
+    let res = step_runner.run(&config.run, &mut ctx);
 
     for step in config.teardown.iter() {
         // ignore the result of teardown steps
         let _ = step_runner.run(step, &mut ctx);
     }
 
-    // when user defines a `poll`, we will create a task for running it periodically.
-    if let Some(poll) = config.poll {
-        let pool = create_database(&DATABASE_PATH).await?;
-        let store = Arc::new(SQLiteTaskStore::new(pool).await?);
-
-        let now = SystemTime::now();
-        let next_run_at = now + poll.interval;
-        let deadline_at = now + poll.max_duration;
-        let spec = Spec { vars: ctx, poll };
-        let task = Task {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: config.name.clone(),
-            spec,
-            status: TaskStatus::Pending,
-            attempts: 0,
-            last_error: None,
-            next_run_at,
-            deadline_at,
-            lock_until: None,
-            created_at: now,
-            updated_at: now,
-        };
-
-        if let Err(e) = store.save(&task).await {
-            eprintln!("Failed to save task: {}", e);
-        }
-    }
+    let pool = create_database(&DATABASE_PATH).await?;
+    let store = SQLiteTaskStore::new(pool).await?;
+    maybe_schedule_poll(&store, &config, ctx, &res).await;
 
     Ok(())
+}
+
+async fn maybe_schedule_poll(
+    store: &dyn TaskStore,
+    config: &Config,
+    ctx: Vars,
+    res: &anyhow::Result<Option<CommandOutput>>,
+) {
+    let Some(poll) = config.poll.clone() else {
+        return;
+    };
+
+    let should_poll = matches!(
+        (&poll.when, res),
+        (PollWhen::Always, _) | (PollWhen::RunPassed, Ok(_)) | (PollWhen::RunFailed, Err(_))
+    );
+    if !should_poll {
+        return;
+    }
+
+    let now = SystemTime::now();
+    let task = Task {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: config.name.clone(),
+        next_run_at: now + poll.interval,
+        deadline_at: now + poll.max_duration,
+        spec: Spec { vars: ctx, poll },
+        status: TaskStatus::Pending,
+        attempts: 0,
+        last_error: None,
+        lock_until: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    if let Err(e) = store.save(&task).await {
+        eprintln!("failed to save poll task {e:#?}");
+    }
 }
 
 #[derive(Debug, Parser)]
