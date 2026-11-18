@@ -160,18 +160,18 @@ pub struct Retry {
 pub struct Poll {
     /// Polling when run is passed
     #[serde(default)]
-    when: PollWhen,
+    pub when: PollWhen,
 
     /// The step to run it periodically
-    run: Step,
+    pub run: Step,
 
     /// The interval between polls
     #[serde(default, with = "humantime_serde")]
-    interval: Duration,
+    pub interval: Duration,
 
     /// The maximum duration to run the polling
     #[serde(default, with = "humantime_serde")]
-    max_duration: Duration,
+    pub max_duration: Duration,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
