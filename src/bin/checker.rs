@@ -53,6 +53,12 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Schedule a poll task if necessary.
+/// Depends on `poll_when`
+///
+/// - If it is always, it will schedule a poll task.
+/// - If it is run_passed, it will schedule a task when res is okay
+/// - If it is run_failed, it will schedule a task when res is an error
 async fn maybe_schedule_poll(
     store: &dyn TaskStore,
     config: &Config,
