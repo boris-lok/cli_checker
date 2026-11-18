@@ -3,8 +3,14 @@ use cli::checker::config::Config;
 use cli::checker::executor::ShellCommandExecutor;
 use cli::checker::runner::StepRunner;
 use cli::checker::template::{UndefinedVariableError, render};
+use cli::constants::DATABASE_PATH;
+use cli::poll::entity::{Spec, Task, TaskStatus};
+use cli::poll::store::{SQLiteTaskStore, TaskStore};
+use cli::utils::create_database;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::SystemTime;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -38,6 +44,34 @@ async fn main() -> anyhow::Result<()> {
     for step in config.teardown.iter() {
         // ignore the result of teardown steps
         let _ = step_runner.run(step, &mut ctx);
+    }
+
+    // when user defines a `poll`, we will create a task for running it periodically.
+    if let Some(poll) = config.poll {
+        let pool = create_database(&DATABASE_PATH).await?;
+        let store = Arc::new(SQLiteTaskStore::new(pool).await?);
+
+        let now = SystemTime::now();
+        let next_run_at = now + poll.interval;
+        let deadline_at = now + poll.max_duration;
+        let spec = Spec { vars: ctx, poll };
+        let task = Task {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: config.name.clone(),
+            spec,
+            status: TaskStatus::Pending,
+            attempts: 0,
+            last_error: None,
+            next_run_at,
+            deadline_at,
+            lock_until: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        if let Err(e) = store.save(&task).await {
+            eprintln!("Failed to save task: {}", e);
+        }
     }
 
     Ok(())
